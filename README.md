@@ -3,6 +3,12 @@
 ## Overview
 This project demonstrates real-time vehicle detection using a YOLO-based object detection model. The system processes video input to identify vehicles and visualize traffic conditions, making it suitable for smart traffic monitoring applications.
 
+## Project Timeline
+
+- Initial development: June 2025
+- Refactoring, cleanup, and GitHub publication: January 2026
+
+
 ## Objective
 The objective of this project was to understand how real-time object detection works and how YOLO can be applied to traffic analysis scenarios.
 
