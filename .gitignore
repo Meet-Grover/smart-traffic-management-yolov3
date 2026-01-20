@@ -1,0 +1,45 @@
+# ===============================
+# Python cache
+# ===============================
+__pycache__/
+*.pyc
+*.pyo
+
+# ===============================
+# Virtual environments
+# ===============================
+venv/
+env/
+.venv/
+
+# ===============================
+# macOS system files
+# ===============================
+.DS_Store
+**/.DS_Store
+._*
+**/._*
+
+# ===============================
+# IDE / Editor files
+# ===============================
+.vscode/
+.idea/
+
+# ===============================
+# YOLO weights
+# ===============================
+yolov3.weights
+yolo-coco/yolov3.weights
+
+# ===============================
+# Raw media (optional but recommended)
+# ===============================
+experiments/videos_raw/
+# Ignore unrelated Android SDK project
+MapMyIndia/
+
+# Generated frames / results
+experiments/frames/
+experiments/result.png
+
