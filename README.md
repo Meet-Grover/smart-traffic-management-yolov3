@@ -5,7 +5,7 @@ This project demonstrates real-time vehicle detection using a YOLO-based object 
 
 ## Project Timeline
 
-- Initial development: June 2025
+- Initial development: July 2025
 - Refactoring, cleanup, and GitHub publication: January 2026
 
 
