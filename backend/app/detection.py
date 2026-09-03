@@ -31,9 +31,11 @@ _model: YOLO | None = None
 def get_model() -> YOLO:
     global _model
     if _model is None:
-        # yolov8n.pt is the small/fast variant; ultralytics downloads it
-        # on first use and caches it locally.
-        _model = YOLO("yolov8n.pt")
+        # yolov8s.pt trades a bit of speed/download size for meaningfully
+        # better accuracy on small, overlapping objects (e.g. a dense,
+        # bird's-eye traffic-jam photo) than the smaller yolov8n.pt.
+        # ultralytics downloads it on first use and caches it locally.
+        _model = YOLO("yolov8s.pt")
     return _model
 
 

@@ -6,7 +6,7 @@ load_dotenv()
 
 
 class Settings:
-    detection_confidence: float = float(os.getenv("DETECTION_CONFIDENCE", 0.4))
+    detection_confidence: float = float(os.getenv("DETECTION_CONFIDENCE", 0.25))
     emergency_confidence: float = float(os.getenv("EMERGENCY_CONFIDENCE", 0.5))
     min_green_seconds: int = int(os.getenv("MIN_GREEN_SECONDS", 10))
     max_green_seconds: int = int(os.getenv("MAX_GREEN_SECONDS", 60))

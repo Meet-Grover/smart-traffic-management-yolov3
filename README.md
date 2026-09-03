@@ -24,6 +24,18 @@ read/write. All of that has been replaced below.
   results.
 - **`legacy/`** — the original implementation, kept for reference only.
 
+## Known accuracy limits
+
+- Dense, low-resolution, bird's-eye traffic-jam photos (dozens of small,
+  overlapping cars) will still undercount vehicles — this is a real
+  limit of general-purpose pretrained detection, not just a threshold to
+  tune. `yolov8s.pt` and a lower confidence threshold (`DETECTION_CONFIDENCE`
+  in `.env`) improve this versus the smaller `yolov8n.pt` default this
+  project started with, at the cost of a slightly larger model download
+  and a few more false positives. For real accuracy on this kind of
+  scene, the right fix is fine-tuning on a dataset of similar aerial
+  traffic photos, not just picking a bigger stock model.
+
 ## Honest limitation
 
 YOLOv8's pretrained weights come from the COCO dataset, which has no
