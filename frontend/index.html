@@ -11,7 +11,9 @@
   .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap:16px; margin-top:24px; }
   .lane { background:#1b1e24; border-radius:12px; padding:16px; border:2px solid transparent; }
   .lane.active { border-color:#4caf50; box-shadow:0 0 0 3px rgba(76,175,80,.2); }
-  .lane.emergency { border-color:#e53935; box-shadow:0 0 0 3px rgba(229,57,53,.25); }
+  .lane.active.active-emergency { border-color:#e53935; box-shadow:0 0 0 3px rgba(229,57,53,.3); }
+  .lane.emergency-pending:not(.active) { border-color:#7a4a1f; border-style:dashed; }
+  .badge.amber { background:#4a3a1f; color:#f2c28b; }
   .lane h3 { margin:0 0 8px; }
   .count { font-size: 32px; font-weight:600; }
   .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; margin-left:8px; }
@@ -40,6 +42,7 @@
   <div class="grid" id="lanes"></div>
 
   <div class="status" id="status">Waiting for first detection…</div>
+  <div class="status" id="countdown" style="display:none;"></div>
 
 <script>
 const LANE_NAMES = ["North", "East", "South", "West"];
@@ -177,8 +180,6 @@ async function sendDetection(laneId, blob) {
     modelWarmedUp = true;
 
     document.getElementById(`count-${laneId}`).textContent = data.vehicle_count;
-    document.getElementById(`badge-${laneId}`).textContent = data.emergency_detected ? "EMERGENCY" : "";
-    document.getElementById(`badge-${laneId}`).className = "badge " + (data.emergency_detected ? "red" : "");
     renderState(data.signal_state);
   } catch (err) {
     text.textContent = "Failed";
@@ -195,14 +196,65 @@ async function sendDetection(laneId, blob) {
   }
 }
 
+let countdownInterval = null;
+let countdownRemaining = 0;
+
 function renderState(state) {
   LANE_NAMES.forEach((_, i) => {
     const el = document.getElementById(`lane-${i}`);
-    el.classList.toggle("active", i === state.active_lane);
-    el.classList.toggle("emergency", state.lanes[i].emergency);
+    const isActive = i === state.active_lane;
+    const isEmergencyPending = state.lanes[i].emergency; // still flagged, hasn't been served yet
+    el.classList.toggle("active", isActive);
+    el.classList.toggle("active-emergency", isActive && state.reason === "emergency_vehicle");
+    el.classList.toggle("emergency-pending", isEmergencyPending);
+
+    const badge = document.getElementById(`badge-${i}`);
+    if (isEmergencyPending) {
+      badge.textContent = isActive ? "EMERGENCY" : "EMERGENCY (waiting)";
+      badge.className = "badge " + (isActive ? "red" : "amber");
+    } else {
+      badge.textContent = "";
+      badge.className = "badge";
+    }
   });
+
   document.getElementById("status").innerHTML =
     `Green: <b>${state.active_lane_name}</b> for <b>${state.green_seconds}s</b> — reason: ${state.reason}`;
+
+  startCountdown(state.green_seconds);
+}
+
+function startCountdown(seconds) {
+  clearInterval(countdownInterval);
+  countdownRemaining = seconds;
+  const el = document.getElementById("countdown");
+  el.style.display = "block";
+  renderCountdown();
+  countdownInterval = setInterval(() => {
+    countdownRemaining -= 1;
+    if (countdownRemaining <= 0) {
+      clearInterval(countdownInterval);
+      el.textContent = "Advancing to the next lane…";
+      advanceSignal();
+    } else {
+      renderCountdown();
+    }
+  }, 1000);
+}
+
+function renderCountdown() {
+  document.getElementById("countdown").textContent = `${countdownRemaining}s remaining on this green`;
+}
+
+async function advanceSignal() {
+  try {
+    const res = await fetch(`${API_BASE}/api/advance`, { method: "POST" });
+    if (!res.ok) throw new Error(`Server responded ${res.status}`);
+    const state = await res.json();
+    renderState(state);
+  } catch (err) {
+    document.getElementById("status").textContent = `Error advancing signal: ${err.message}`;
+  }
 }
 
 // Live updates via WebSocket, in case another client updates state

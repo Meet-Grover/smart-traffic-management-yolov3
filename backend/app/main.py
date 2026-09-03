@@ -52,12 +52,7 @@ async def detect_lane(lane_id: int, file: UploadFile = File(...)):
     frame = _decode_upload(data)
     result = detect_frame(frame)
 
-    counts = [l.vehicle_count for l in controller.state.lanes]
-    emergencies = [l.emergency for l in controller.state.lanes]
-    counts[lane_id] = result.vehicle_count
-    emergencies[lane_id] = result.emergency_detected
-
-    state = controller.update(counts, emergencies)
+    state = controller.update_lane_data(lane_id, result.vehicle_count, result.emergency_detected)
     await _broadcast(state.as_dict())
 
     return {
@@ -66,6 +61,16 @@ async def detect_lane(lane_id: int, file: UploadFile = File(...)):
         "emergency_detected": result.emergency_detected,
         "signal_state": state.as_dict(),
     }
+
+
+@app.post("/api/advance")
+async def advance():
+    """Called by the frontend when the current lane's green countdown
+    reaches zero — moves the signal to the next lane (round-robin,
+    density-scaled duration, with emergency-vehicle preemption)."""
+    state = controller.advance()
+    await _broadcast(state.as_dict())
+    return state.as_dict()
 
 
 @app.websocket("/ws")

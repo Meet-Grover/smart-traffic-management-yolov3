@@ -1,14 +1,22 @@
 """
 Adaptive traffic-signal controller.
 
-Replaces the original project's approach (a global array persisted to a
-pickle file on every read/write) with an explicit, in-memory state machine
-that's easy to unit test and reason about.
+Two things drive a change in which lane is green:
 
-Rule: the lane with the highest vehicle density gets the green light, for
-a duration scaled by that density (clamped between MIN/MAX green seconds).
-An emergency vehicle in any lane immediately pre-empts the signal in its
-favor, overriding density-based selection.
+1. advance() — called when the current lane's green countdown reaches
+   zero (or once, to kick off the very first cycle). This moves through
+   lanes in round-robin order (fair: no lane starves forever), with each
+   lane's green duration scaled by its own last-known vehicle density.
+   A lane flagged with an emergency vehicle preempts the round-robin
+   order immediately — but only once per detection, so it doesn't hog
+   green forever on a single stale detection.
+
+2. update_lane_data() — called whenever a new frame is analyzed for a
+   lane. It only updates that lane's stored density/emergency flag; it
+   does NOT interrupt whichever lane is currently mid-countdown, except
+   to kick off the very first cycle if nothing has run yet. This mirrors
+   real intersections: a camera updates continuously, but the signal
+   doesn't visibly jump around every time a new frame comes in.
 """
 from __future__ import annotations
 
@@ -44,37 +52,50 @@ class SignalState:
         }
 
 
+def _green_duration_for(density: int) -> int:
+    return min(
+        settings.max_green_seconds,
+        max(settings.min_green_seconds, settings.min_green_seconds + density * 2),
+    )
+
+
 class SignalController:
     """Holds live state for a single intersection with N lanes."""
 
     def __init__(self, lane_names: list[str]):
         self.state = SignalState(lanes=[LaneState(name=n) for n in lane_names])
 
-    def update(self, counts: list[int], emergencies: list[bool]) -> SignalState:
-        for lane, count, emergency in zip(self.state.lanes, counts, emergencies):
-            lane.vehicle_count = count
-            lane.emergency = emergency
+    def update_lane_data(self, lane_id: int, count: int, emergency: bool) -> SignalState:
+        lane = self.state.lanes[lane_id]
+        lane.vehicle_count = count
+        lane.emergency = emergency
 
+        # Nothing has run yet (server just started) — kick off the cycle
+        # immediately instead of waiting on a countdown that never began.
+        if self.state.reason == "initial":
+            self.advance()
+        return self.state
+
+    def advance(self) -> SignalState:
+        """Move to the next lane. Call this when the current green
+        countdown reaches zero (or once, to start the first cycle)."""
         emergency_idx = next(
             (i for i, l in enumerate(self.state.lanes) if l.emergency), None
         )
 
         if emergency_idx is not None:
-            self.state.active_lane = emergency_idx
+            chosen = emergency_idx
             self.state.green_seconds = settings.max_green_seconds
             self.state.reason = "emergency_vehicle"
-            return self.state
+            # Treat this emergency as served so the same stale detection
+            # doesn't preempt the queue again on every future advance().
+            self.state.lanes[chosen].emergency = False
+        else:
+            num_lanes = len(self.state.lanes)
+            start = self.state.active_lane if self.state.reason != "initial" else -1
+            chosen = (start + 1) % num_lanes
+            self.state.green_seconds = _green_duration_for(self.state.lanes[chosen].vehicle_count)
+            self.state.reason = "round_robin"
 
-        densest_idx = max(
-            range(len(self.state.lanes)),
-            key=lambda i: self.state.lanes[i].vehicle_count,
-        )
-        density = self.state.lanes[densest_idx].vehicle_count
-        green = min(
-            settings.max_green_seconds,
-            max(settings.min_green_seconds, settings.min_green_seconds + density * 2),
-        )
-        self.state.active_lane = densest_idx
-        self.state.green_seconds = green
-        self.state.reason = "density"
+        self.state.active_lane = chosen
         return self.state
