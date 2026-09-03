@@ -8,7 +8,7 @@
   body { font-family: -apple-system, system-ui, sans-serif; background:#0f1115; color:#eee; margin:0; padding:24px; }
   h1 { font-size: 20px; margin-bottom: 4px; }
   p.sub { color:#9aa0a6; margin-top:0; }
-  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:16px; margin-top:24px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap:16px; margin-top:24px; }
   .lane { background:#1b1e24; border-radius:12px; padding:16px; border:2px solid transparent; }
   .lane.active { border-color:#4caf50; box-shadow:0 0 0 3px rgba(76,175,80,.2); }
   .lane.emergency { border-color:#e53935; box-shadow:0 0 0 3px rgba(229,57,53,.25); }
@@ -17,14 +17,20 @@
   .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; margin-left:8px; }
   .badge.green { background:#1e4620; color:#7fd88a; }
   .badge.red { background:#4a1f1f; color:#f28b8b; }
-  input[type=file] { margin-top:8px; font-size:12px; }
+  .preview { width:100%; height:110px; object-fit:cover; border-radius:8px; margin:8px 0; background:#111; display:none; }
+  .samples { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0; }
+  .samples img { width:44px; height:44px; object-fit:cover; border-radius:6px; cursor:pointer; border:2px solid transparent; opacity:.85; transition:.15s; }
+  .samples img:hover { opacity:1; transform:scale(1.05); }
+  .samples img.selected { border-color:#4caf50; opacity:1; }
+  .samples-label { font-size:11px; color:#9aa0a6; text-transform:uppercase; letter-spacing:.03em; margin-top:6px; }
+  input[type=file] { margin-top:8px; font-size:12px; width:100%; }
   .status { margin-top:24px; padding:12px 16px; background:#1b1e24; border-radius:12px; }
-  button { background:#3b82f6; color:white; border:none; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:12px; }
+  .loading { opacity:.5; }
 </style>
 </head>
 <body>
   <h1>Smart Traffic Management System</h1>
-  <p class="sub">Upload a frame per lane (or a photo of traffic) — YOLOv8 detects vehicle density and emergency vehicles live.</p>
+  <p class="sub">Pick a sample image per lane, or upload your own — YOLOv8 detects vehicle density and emergency vehicles live.</p>
 
   <div class="grid" id="lanes"></div>
 
@@ -34,30 +40,101 @@
 const LANE_NAMES = ["North", "East", "South", "West"];
 const API_BASE = window.location.origin.replace(/:\d+$/, ":8000");
 
+// Bundled sample images, shipped alongside this page (frontend/samples/).
+const SAMPLES = [
+  { file: "samples/traffic-1.jpg", label: "Traffic 1" },
+  { file: "samples/traffic-2.jpg", label: "Traffic 2" },
+  { file: "samples/traffic-3.jpg", label: "Traffic 3" },
+  { file: "samples/traffic-4.jpg", label: "Traffic 4" },
+  { file: "samples/ambulance-1.jpg", label: "Ambulance 1" },
+  { file: "samples/ambulance-2.jpg", label: "Ambulance 2" },
+  { file: "samples/ambulance-3.jpg", label: "Ambulance 3" },
+];
+
 const lanesEl = document.getElementById("lanes");
 LANE_NAMES.forEach((name, i) => {
   const div = document.createElement("div");
   div.className = "lane";
   div.id = `lane-${i}`;
+
+  const samplesHtml = SAMPLES.map((s, si) =>
+    `<img src="${s.file}" title="${s.label}" data-lane="${i}" data-src="${s.file}" onclick="selectSample(${i}, '${s.file}', this)" />`
+  ).join("");
+
   div.innerHTML = `
     <h3>${name} <span class="badge" id="badge-${i}"></span></h3>
+    <img class="preview" id="preview-${i}" />
     <div class="count" id="count-${i}">–</div>
     <div style="font-size:12px;color:#9aa0a6;">vehicles detected</div>
-    <input type="file" accept="image/*" onchange="uploadLane(${i}, this.files[0])" />
+    <div class="samples-label">Sample images</div>
+    <div class="samples">${samplesHtml}</div>
+    <div class="samples-label">Or upload your own</div>
+    <input type="file" accept="image/*" onchange="uploadFile(${i}, this.files[0])" />
   `;
   lanesEl.appendChild(div);
 });
 
-async function uploadLane(laneId, file) {
+function setPreview(laneId, src) {
+  const img = document.getElementById(`preview-${laneId}`);
+  img.src = src;
+  img.style.display = "block";
+}
+
+async function selectSample(laneId, path, imgEl) {
+  document.querySelectorAll(`.lane#lane-${laneId} .samples img`).forEach(el => el.classList.remove("selected"));
+  imgEl.classList.add("selected");
+  setPreview(laneId, path);
+
+  // Note: we deliberately avoid fetch() on a file:// path here — Chrome
+  // blocks fetching local files via fetch/XHR even though <img> loading
+  // them works fine. Instead, draw the already-loaded <img> onto a
+  // canvas and export that as a blob, which works regardless of origin.
+  const blob = await imageElementToBlob(imgEl);
+  await sendDetection(laneId, blob);
+}
+
+function imageElementToBlob(imgEl) {
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = imgEl.naturalWidth;
+      canvas.height = imgEl.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(imgEl, 0, 0);
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("canvas export failed")), "image/jpeg", 0.92);
+    };
+    if (imgEl.complete && imgEl.naturalWidth > 0) finish();
+    else imgEl.onload = finish;
+  });
+}
+
+async function uploadFile(laneId, file) {
   if (!file) return;
-  const form = new FormData();
-  form.append("file", file);
-  const res = await fetch(`${API_BASE}/api/lanes/${laneId}/detect`, { method: "POST", body: form });
-  const data = await res.json();
-  document.getElementById(`count-${laneId}`).textContent = data.vehicle_count;
-  document.getElementById(`badge-${laneId}`).textContent = data.emergency_detected ? "EMERGENCY" : "";
-  document.getElementById(`badge-${laneId}`).className = "badge " + (data.emergency_detected ? "red" : "");
-  renderState(data.signal_state);
+  document.querySelectorAll(`.lane#lane-${laneId} .samples img`).forEach(el => el.classList.remove("selected"));
+  setPreview(laneId, URL.createObjectURL(file));
+  await sendDetection(laneId, file);
+}
+
+async function sendDetection(laneId, blob) {
+  const lane = document.getElementById(`lane-${laneId}`);
+  lane.classList.add("loading");
+  document.getElementById("status").textContent = "Detecting…";
+  try {
+    const form = new FormData();
+    form.append("file", blob, "frame.jpg");
+    const res = await fetch(`${API_BASE}/api/lanes/${laneId}/detect`, { method: "POST", body: form });
+    if (!res.ok) throw new Error(`Server responded ${res.status}`);
+    const data = await res.json();
+    document.getElementById(`count-${laneId}`).textContent = data.vehicle_count;
+    document.getElementById(`badge-${laneId}`).textContent = data.emergency_detected ? "EMERGENCY" : "";
+    document.getElementById(`badge-${laneId}`).className = "badge " + (data.emergency_detected ? "red" : "");
+    renderState(data.signal_state);
+  } catch (err) {
+    document.getElementById("status").textContent =
+      `Error talking to backend at ${API_BASE} — is uvicorn running? (${err.message})`;
+  } finally {
+    lane.classList.remove("loading");
+  }
 }
 
 function renderState(state) {
@@ -71,8 +148,10 @@ function renderState(state) {
 }
 
 // Live updates via WebSocket, in case another client updates state
-const ws = new WebSocket(`${API_BASE.replace("http", "ws")}/ws`);
-ws.onmessage = (ev) => renderState(JSON.parse(ev.data));
+try {
+  const ws = new WebSocket(`${API_BASE.replace("http", "ws")}/ws`);
+  ws.onmessage = (ev) => renderState(JSON.parse(ev.data));
+} catch (e) { /* WebSocket optional; polling not implemented, upload still works without it */ }
 </script>
 </body>
 </html>
