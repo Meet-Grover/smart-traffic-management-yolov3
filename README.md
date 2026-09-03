@@ -44,9 +44,11 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
-Then open `frontend/index.html` in a browser (or serve it with any static
-file server) and upload a traffic image/frame for each of the four lanes.
-The dashboard updates live via WebSocket as detections come in.
+Then open **http://127.0.0.1:8000** in your browser (the backend serves
+the frontend itself — do not open `frontend/index.html` directly as a
+file, browsers restrict what file:// pages are allowed to do). Click a
+bundled sample image per lane, or upload your own, and watch the
+dashboard update live via WebSocket as detections come in.
 
 ## API
 
