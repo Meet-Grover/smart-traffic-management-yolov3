@@ -43,7 +43,10 @@
 
 <script>
 const LANE_NAMES = ["North", "East", "South", "West"];
-const API_BASE = window.location.origin.replace(/:\d+$/, ":8000");
+// The page is now served BY this same FastAPI server (see backend/app/main.py's
+// static mount), so API calls and the WebSocket are same-origin — no more
+// file:// guesswork needed.
+const API_BASE = "";
 
 // Bundled sample images, shipped alongside this page (frontend/samples/).
 const SAMPLES = [
@@ -204,9 +207,10 @@ function renderState(state) {
 
 // Live updates via WebSocket, in case another client updates state
 try {
-  const ws = new WebSocket(`${API_BASE.replace("http", "ws")}/ws`);
+  const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${wsProtocol}://${window.location.host}/ws`);
   ws.onmessage = (ev) => renderState(JSON.parse(ev.data));
-} catch (e) { /* WebSocket optional; polling not implemented, upload still works without it */ }
+} catch (e) { /* WebSocket optional; upload still works without it */ }
 </script>
 </body>
 </html>

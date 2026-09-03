@@ -6,8 +6,11 @@ import io
 
 import numpy as np
 import cv2
+from pathlib import Path
+
 from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.detection import detect_frame
 from app.signal_control import SignalController
@@ -23,6 +26,7 @@ app.add_middleware(
 )
 
 controller = SignalController(LANE_NAMES)
+
 _websockets: list[WebSocket] = []
 
 
@@ -85,3 +89,13 @@ async def _broadcast(payload: dict):
             dead.append(ws)
     for ws in dead:
         _websockets.remove(ws)
+
+
+# Serve the frontend (index.html + samples/) from this same server, at
+# the very end so it never shadows the API routes registered above.
+# This also gives the page a real http:// origin instead of file://,
+# which fixes canvas/WebSocket restrictions Safari and Chrome enforce
+# on local files.
+_frontend_dir = Path(__file__).resolve().parent.parent.parent / "frontend"
+if _frontend_dir.is_dir():
+    app.mount("/", StaticFiles(directory=_frontend_dir, html=True), name="frontend")
