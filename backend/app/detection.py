@@ -48,10 +48,19 @@ class DetectionResult:
 
 def _looks_like_emergency(frame: np.ndarray, box: tuple[int, int, int, int]) -> bool:
     """Heuristic: look for colors associated with emergency-vehicle
-    livery across the whole box — red/blue light bars (US/generic
-    styling) OR a high-visibility yellow/green "Battenburg" pattern
-    (common on UK/EU ambulances). This is still a heuristic, not a
-    trained classifier — see the module docstring."""
+    livery — red/blue light bars near the roof (US/generic styling), OR
+    a high-visibility yellow/green "Battenburg" checkerboard pattern
+    (common on UK/EU ambulances). Still a heuristic, not a trained
+    classifier — see the module docstring.
+
+    An earlier version checked for "any meaningful patch of yellow
+    anywhere in the box", which false-positived on ordinary yellow
+    vehicles (taxis, construction equipment) that happened to appear in
+    a scene. A real Battenburg pattern isn't just "some yellow" — it's
+    yellow-green AND white/silver squares covering MOST of the vehicle
+    in roughly equal measure. Requiring the box to be dominated by both
+    colors together, not just one, cuts out most false positives from
+    solid-colored yellow vehicles."""
     x1, y1, x2, y2 = box
     if y2 <= y1 or x2 <= x1:
         return False
@@ -59,19 +68,30 @@ def _looks_like_emergency(frame: np.ndarray, box: tuple[int, int, int, int]) -> 
     if patch.size == 0:
         return False
     hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
-
-    red_mask = cv2.inRange(hsv, (0, 120, 120), (10, 255, 255)) | cv2.inRange(
-        hsv, (170, 120, 120), (180, 255, 255)
-    )
-    blue_mask = cv2.inRange(hsv, (100, 120, 120), (130, 255, 255))
-    # Bright safety yellow-green, e.g. UK/EU "Battenburg" ambulance livery.
-    hi_vis_mask = cv2.inRange(hsv, (25, 90, 150), (75, 255, 255))
-
     total = patch.shape[0] * patch.shape[1]
-    signal_ratio = cv2.countNonZero(red_mask | blue_mask) / total
-    hi_vis_ratio = cv2.countNonZero(hi_vis_mask) / total
 
-    return signal_ratio > 0.02 or hi_vis_ratio > 0.12
+    # Light bar: a small, strongly saturated red/blue patch near the
+    # roof (top quarter of the box) — a solid-colored cargo truck won't
+    # have this concentrated near the top.
+    roof_strip = hsv[: max(1, hsv.shape[0] // 4), :]
+    red_mask = cv2.inRange(roof_strip, (0, 120, 120), (10, 255, 255)) | cv2.inRange(
+        roof_strip, (170, 120, 120), (180, 255, 255)
+    )
+    blue_mask = cv2.inRange(roof_strip, (100, 120, 120), (130, 255, 255))
+    light_bar_ratio = cv2.countNonZero(red_mask | blue_mask) / max(1, roof_strip.size // 3)
+
+    # Battenburg checkerboard: yellow-green AND white/silver must BOTH
+    # be substantial AND together dominate the box — not just "yellow
+    # present somewhere in frame".
+    hi_vis_mask = cv2.inRange(hsv, (25, 90, 150), (75, 255, 255))
+    white_mask = cv2.inRange(hsv, (0, 0, 180), (180, 40, 255))
+    hi_vis_ratio = cv2.countNonZero(hi_vis_mask) / total
+    white_ratio = cv2.countNonZero(white_mask) / total
+    is_checkerboard = (
+        hi_vis_ratio > 0.15 and white_ratio > 0.15 and (hi_vis_ratio + white_ratio) > 0.5
+    )
+
+    return light_bar_ratio > 0.02 or is_checkerboard
 
 
 def detect_frame(frame: np.ndarray) -> DetectionResult:
