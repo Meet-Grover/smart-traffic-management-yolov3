@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Smart Traffic Management</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, system-ui, sans-serif; background:#0f1115; color:#eee; margin:0; padding:24px; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  p.sub { color:#9aa0a6; margin-top:0; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:16px; margin-top:24px; }
+  .lane { background:#1b1e24; border-radius:12px; padding:16px; border:2px solid transparent; }
+  .lane.active { border-color:#4caf50; box-shadow:0 0 0 3px rgba(76,175,80,.2); }
+  .lane.emergency { border-color:#e53935; box-shadow:0 0 0 3px rgba(229,57,53,.25); }
+  .lane h3 { margin:0 0 8px; }
+  .count { font-size: 32px; font-weight:600; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; margin-left:8px; }
+  .badge.green { background:#1e4620; color:#7fd88a; }
+  .badge.red { background:#4a1f1f; color:#f28b8b; }
+  input[type=file] { margin-top:8px; font-size:12px; }
+  .status { margin-top:24px; padding:12px 16px; background:#1b1e24; border-radius:12px; }
+  button { background:#3b82f6; color:white; border:none; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:12px; }
+</style>
+</head>
+<body>
+  <h1>Smart Traffic Management System</h1>
+  <p class="sub">Upload a frame per lane (or a photo of traffic) — YOLOv8 detects vehicle density and emergency vehicles live.</p>
+
+  <div class="grid" id="lanes"></div>
+
+  <div class="status" id="status">Waiting for first detection…</div>
+
+<script>
+const LANE_NAMES = ["North", "East", "South", "West"];
+const API_BASE = window.location.origin.replace(/:\d+$/, ":8000");
+
+const lanesEl = document.getElementById("lanes");
+LANE_NAMES.forEach((name, i) => {
+  const div = document.createElement("div");
+  div.className = "lane";
+  div.id = `lane-${i}`;
+  div.innerHTML = `
+    <h3>${name} <span class="badge" id="badge-${i}"></span></h3>
+    <div class="count" id="count-${i}">–</div>
+    <div style="font-size:12px;color:#9aa0a6;">vehicles detected</div>
+    <input type="file" accept="image/*" onchange="uploadLane(${i}, this.files[0])" />
+  `;
+  lanesEl.appendChild(div);
+});
+
+async function uploadLane(laneId, file) {
+  if (!file) return;
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/api/lanes/${laneId}/detect`, { method: "POST", body: form });
+  const data = await res.json();
+  document.getElementById(`count-${laneId}`).textContent = data.vehicle_count;
+  document.getElementById(`badge-${laneId}`).textContent = data.emergency_detected ? "EMERGENCY" : "";
+  document.getElementById(`badge-${laneId}`).className = "badge " + (data.emergency_detected ? "red" : "");
+  renderState(data.signal_state);
+}
+
+function renderState(state) {
+  LANE_NAMES.forEach((_, i) => {
+    const el = document.getElementById(`lane-${i}`);
+    el.classList.toggle("active", i === state.active_lane);
+    el.classList.toggle("emergency", state.lanes[i].emergency);
+  });
+  document.getElementById("status").innerHTML =
+    `Green: <b>${state.active_lane_name}</b> for <b>${state.green_seconds}s</b> — reason: ${state.reason}`;
+}
+
+// Live updates via WebSocket, in case another client updates state
+const ws = new WebSocket(`${API_BASE.replace("http", "ws")}/ws`);
+ws.onmessage = (ev) => renderState(JSON.parse(ev.data));
+</script>
+</body>
+</html>
