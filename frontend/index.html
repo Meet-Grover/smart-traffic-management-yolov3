@@ -26,6 +26,11 @@
   input[type=file] { margin-top:8px; font-size:12px; width:100%; }
   .status { margin-top:24px; padding:12px 16px; background:#1b1e24; border-radius:12px; }
   .loading { opacity:.5; }
+  .progress-wrap { height:4px; background:#2a2e37; border-radius:2px; margin:8px 0 2px; overflow:hidden; display:none; }
+  .progress-wrap.active { display:block; }
+  .progress-bar { height:100%; width:0%; background:#4caf50; transition:width .2s linear; }
+  .progress-text { font-size:11px; color:#9aa0a6; display:none; margin-bottom:6px; }
+  .progress-text.active { display:block; }
 </style>
 </head>
 <body>
@@ -64,6 +69,8 @@ LANE_NAMES.forEach((name, i) => {
   div.innerHTML = `
     <h3>${name} <span class="badge" id="badge-${i}"></span></h3>
     <img class="preview" id="preview-${i}" />
+    <div class="progress-wrap" id="progress-wrap-${i}"><div class="progress-bar" id="progress-bar-${i}"></div></div>
+    <div class="progress-text" id="progress-text-${i}"></div>
     <div class="count" id="count-${i}">–</div>
     <div style="font-size:12px;color:#9aa0a6;">vehicles detected</div>
     <div class="samples-label">Sample images</div>
@@ -115,9 +122,45 @@ async function uploadFile(laneId, file) {
   await sendDetection(laneId, file);
 }
 
+// The backend can't report real progress mid-request (it's one
+// synchronous call), so instead we estimate: the very first detection
+// call on a fresh server also downloads+loads the YOLOv8 weights, which
+// takes far longer than every call after it. We animate the bar toward
+// ~90% over that estimated duration, then snap to 100% when the real
+// response lands, so the wait is at least legible even without exact
+// progress data.
+let modelWarmedUp = false;
+const FIRST_RUN_ESTIMATE_MS = 20000; // model download + first inference
+const WARM_RUN_ESTIMATE_MS = 1200;   // typical CPU inference for one image
+
 async function sendDetection(laneId, blob) {
   const lane = document.getElementById(`lane-${laneId}`);
+  const wrap = document.getElementById(`progress-wrap-${laneId}`);
+  const bar = document.getElementById(`progress-bar-${laneId}`);
+  const text = document.getElementById(`progress-text-${laneId}`);
+
   lane.classList.add("loading");
+  wrap.classList.add("active");
+  text.classList.add("active");
+
+  const estimate = modelWarmedUp ? WARM_RUN_ESTIMATE_MS : FIRST_RUN_ESTIMATE_MS;
+  const startedAt = performance.now();
+  bar.style.width = "0%";
+  text.textContent = modelWarmedUp
+    ? "Detecting…"
+    : "Detecting… (first run downloads the YOLOv8 model, ~15–20s)";
+
+  const tick = setInterval(() => {
+    const elapsed = performance.now() - startedAt;
+    // Ease toward 90%, never claiming completion until the response lands.
+    const pct = Math.min(90, (elapsed / estimate) * 90);
+    bar.style.width = `${pct}%`;
+    if (!modelWarmedUp) {
+      const remaining = Math.max(0, Math.ceil((estimate - elapsed) / 1000));
+      text.textContent = `Detecting… (first run downloads the YOLOv8 model, ~${remaining}s left)`;
+    }
+  }, 150);
+
   document.getElementById("status").textContent = "Detecting…";
   try {
     const form = new FormData();
@@ -125,15 +168,27 @@ async function sendDetection(laneId, blob) {
     const res = await fetch(`${API_BASE}/api/lanes/${laneId}/detect`, { method: "POST", body: form });
     if (!res.ok) throw new Error(`Server responded ${res.status}`);
     const data = await res.json();
+
+    bar.style.width = "100%";
+    text.textContent = "Done";
+    modelWarmedUp = true;
+
     document.getElementById(`count-${laneId}`).textContent = data.vehicle_count;
     document.getElementById(`badge-${laneId}`).textContent = data.emergency_detected ? "EMERGENCY" : "";
     document.getElementById(`badge-${laneId}`).className = "badge " + (data.emergency_detected ? "red" : "");
     renderState(data.signal_state);
   } catch (err) {
+    text.textContent = "Failed";
+    bar.style.width = "0%";
     document.getElementById("status").textContent =
       `Error talking to backend at ${API_BASE} — is uvicorn running? (${err.message})`;
   } finally {
+    clearInterval(tick);
     lane.classList.remove("loading");
+    setTimeout(() => {
+      wrap.classList.remove("active");
+      text.classList.remove("active");
+    }, 600);
   }
 }
 
