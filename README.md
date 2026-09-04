@@ -21,7 +21,16 @@ read/write. All of that has been replaced below.
   - `app/main.py` — REST + WebSocket API.
 - **`frontend/index.html`** — a single-page live dashboard (no build step
   needed) showing all 4 lanes, current signal state, and detection
-  results.
+  results, plus a live animated intersection (four roads, a traffic
+  light per approach, and vehicle icons that scale with detected
+  density) so the signal logic is visible at a glance, not just as
+  numbers in a status line.
+- **`frontend/samples/`** — bundled sample images. `traffic-1.jpg`
+  through `traffic-4.jpg` are real 1280x720 stills extracted with
+  `ffmpeg` from this project's own dashcam footage
+  (`legacy/yolo/videos_raw/*.mp4`) — genuinely this project's footage,
+  no licensing question, and far sharper than the original ~400px-wide
+  web thumbnails they replaced. `ambulance-*.jpg` are unchanged.
 - **`legacy/`** — the original implementation, kept for reference only.
 
 ## Known accuracy limits
@@ -29,12 +38,18 @@ read/write. All of that has been replaced below.
 - Dense, low-resolution, bird's-eye traffic-jam photos (dozens of small,
   overlapping cars) will still undercount vehicles — this is a real
   limit of general-purpose pretrained detection, not just a threshold to
-  tune. `yolov8s.pt` and a lower confidence threshold (`DETECTION_CONFIDENCE`
-  in `.env`) improve this versus the smaller `yolov8n.pt` default this
-  project started with, at the cost of a slightly larger model download
-  and a few more false positives. For real accuracy on this kind of
-  scene, the right fix is fine-tuning on a dataset of similar aerial
-  traffic photos, not just picking a bigger stock model.
+  tune. Three things have been tuned to reduce it as far as reasonably
+  possible without fine-tuning a custom model: `yolov8s.pt` instead of
+  the smaller `yolov8n.pt` this project started with, a lower confidence
+  threshold (`DETECTION_CONFIDENCE` in `.env`), and running inference at
+  a resolution scaled to the source image (up to 1280px, see
+  `_inference_size()` in `detection.py`) instead of YOLO's default
+  640px — downscaling a dense photo to 640px before detection was
+  shrinking small/distant cars below what the model could resolve. The
+  higher-resolution bundled sample images above compound with this: more
+  real pixels per vehicle to begin with. For real accuracy beyond this,
+  the right fix is fine-tuning on a dataset of similar aerial traffic
+  photos, not just picking a bigger stock model or a bigger image.
 
 ## Honest limitation
 

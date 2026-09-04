@@ -94,11 +94,29 @@ def _looks_like_emergency(frame: np.ndarray, box: tuple[int, int, int, int]) -> 
     return light_bar_ratio > 0.02 or is_checkerboard
 
 
+def _inference_size(frame: np.ndarray) -> int:
+    """Pick an inference resolution scaled to the source image, instead
+    of YOLO's default 640px. Dense, bird's-eye traffic photos (like the
+    1280x720 samples bundled with this project) pack dozens of small,
+    overlapping vehicles into a frame — downscaling that to 640px before
+    detection is a major cause of undercounting, since small/distant
+    cars shrink below what the model can resolve. Running inference
+    closer to the source resolution (capped at 1280, and rounded to a
+    multiple of 32 as YOLO's stride requires) trades a bit of CPU time
+    for meaningfully better recall on exactly this kind of scene."""
+    longest_side = max(frame.shape[0], frame.shape[1])
+    size = min(1280, max(640, longest_side))
+    return int(round(size / 32) * 32)
+
+
 def detect_frame(frame: np.ndarray) -> DetectionResult:
     """Run detection on a single BGR frame (as read by cv2)."""
     model = get_model()
     results = model.predict(
-        frame, conf=settings.detection_confidence, verbose=False
+        frame,
+        conf=settings.detection_confidence,
+        imgsz=_inference_size(frame),
+        verbose=False,
     )[0]
 
     boxes = []
